@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>现场签到</title>
+    <!-- 引入 LeanCloud SDK -->
+    <script src="//code.bdstatic.com/npm/leancloud-storage@4.12.0/dist/av-min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f5f7fa; margin: 0; padding: 20px; color: #333; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); max-width: 600px; margin: 0 auto; }
+        h1, h2 { text-align: center; color: #333; margin-top: 0; }
+        .btn { display: block; width: 100%; padding: 12px; background: #07c160; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; margin-top: 15px; }
+        .btn:disabled { background: #ccc; }
+        .btn-outline { background: white; color: #07c160; border: 1px solid #07c160; }
+        .input-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 16px; }
+        .status { text-align: center; padding: 15px; margin: 15px 0; border-radius: 8px; font-weight: bold; }
+        .success { background: #e6ffed; color: #07c160; }
+        .error { background: #ffe6e6; color: #f56c6c; }
+        .hidden { display: none; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background: #f2f2f2; }
+        .loading { text-align: center; color: #999; }
+        #debug-info { font-size: 12px; color: #999; text-align: center; margin-top: 20px; }
+    </style>
+</head>
+<body>
+
+    <!-- 页面 A: 管理员面板 -->
+    <div id="admin-panel" class="card hidden">
+        <h2>我是管理者</h2>
+        <div style="text-align: center; color: #666; margin-bottom: 20px;">
+            <p>当前定位精度：<span id="admin-acc">...</span> 米</p>
+        </div>
+        <button class="btn" onclick="initiateSign()">📍 设定当前位置为签到点</button>
+        
+        <div id="share-area" class="hidden" style="margin-top:20px; border-top:1px solid #eee; padding-top:20px;">
+            <p style="text-align: center;">👇 将此链接发到群里 👇</p>
+            <textarea id="share-link" style="width:100%; height:60px; padding:10px; font-size:14px; color:#555;" readonly></textarea>
+            <button class="btn btn-outline" onclick="copyLink()">复制链接</button>
+        </div>
+
+        <div style="margin-top: 30px;">
+            <h3>📊 签到数据汇总</h3>
+            <button class="btn btn-outline" onclick="loadData()">刷新列表</button>
+            <div id="data-table-container" style="overflow-x: auto;">
+                <table id="data-table">
+                    <thead><tr><th>姓名</th><th>班级</th><th>距离误差</th><th>时间</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 页面 B: 学生签到面板 -->
+    <div id="student-panel" class="card hidden">
+        <h1>现场签到</h1>
+        <div class="status error" id="dist-status">正在定位中...</div>
+        
+        <div id="sign-form" class="hidden">
+            <div class="input-group">
+                <label>姓名</label>
+                <input type="text" id="s-name" placeholder="请输入姓名">
+            </div>
+            <div class="input-group">
+                <label>班级</label>
+                <input type="text" id="s-class" placeholder="请输入班级">
+            </div>
+            <div class="input-group">
+                <label>学号</label>
+                <input type="text" id="s-no" placeholder="请输入学号">
+            </div>
+            <button class="btn" id="submit-btn" onclick="submitSign()">确认签到</button>
+        </div>
+        <button class="btn btn-outline" onclick="checkLocation()" style="margin-top:10px;">刷新定位</button>
+    </div>
+
+    <!-- 页面 C: 签到成功 -->
+    <div id="success-panel" class="card hidden" style="text-align: center;">
+        <h2 style="color: #07c160;">✅ 签到成功</h2>
+        <p>您的记录已提交</p>
+        <p style="font-size: 12px; color: #999;">请勿重复提交</p>
+    </div>
+
+    <div id="debug-info">V2.0 Pure HTML</div>
+
+<script>
+    // ================= 配置区域 (请修改这里) =================
+    const LEANCLOUD_APP_ID = "0sXEX9TfcX0cmnpC8LW0urn8-gzGzoHsz";      // 替换为 LeanCloud App ID
+    const LEANCLOUD_APP_KEY = "cRbQkmMYvmbq6IZBkCqUi9cU";    // 替换为 LeanCloud App Key
+    const LEANCLOUD_SERVER_URL = "https://0sxex9tf.lc-cn-n1-shared.com"; // 替换为 API 域名
+    // ========================================================
+
+    // 初始化 LeanCloud
+    if(LEANCLOUD_APP_ID !== "你的AppID"){
+        AV.init({ appId: LEANCLOUD_APP_ID, appKey: LEANCLOUD_APP_KEY, serverURL: LEANCLOUD_SERVER_URL });
+    }
+
+    // 全局变量
+    const urlParams = new URLSearchParams(window.location.search);
+    const MODE = urlParams.get('mode'); // 'sign' or null(admin)
+    const TARGET_LAT = parseFloat(urlParams.get('lat'));
+    const TARGET_LNG = parseFloat(urlParams.get('lng'));
+    const LIMIT_DIST = 500; // 限制500米
+
+    // 计算距离公式 (Haversine)
+    function getDistance(lat1, lng1, lat2, lng2) {
+        const R = 6378137; // 地球半径
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLng = (lng2 - lng1) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLng/2) * Math.sin(dLng/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return Math.round(R * c);
+    }
+
+    // 主逻辑入口
+    window.onload = function() {
+        if (!LEANCLOUD_APP_ID || LEANCLOUD_APP_ID === "你的AppID") {
+            alert("⚠️ 请先在代码中配置 LeanCloud AppID！");
+            return;
+        }
+
+        if (MODE === 'sign' && TARGET_LAT && TARGET_LNG) {
+            // 进入学生签到模式
+            document.getElementById('student-panel').classList.remove('hidden');
+            // 自动回填
+            const cached = JSON.parse(localStorage.getItem('user_info') || '{}');
+            if(cached.name) document.getElementById('s-name').value = cached.name;
+            if(cached.cls) document.getElementById('s-class').value = cached.cls;
+            if(cached.no) document.getElementById('s-no').value = cached.no;
+            checkLocation();
+        } else {
+            // 进入管理员模式
+            document.getElementById('admin-panel').classList.remove('hidden');
+            // 获取管理员当前位置精度
+            navigator.geolocation.getCurrentPosition(res => {
+                document.getElementById('admin-acc').innerText = Math.round(res.coords.accuracy);
+            }, err => {
+                document.getElementById('admin-acc').innerText = "获取失败";
+                alert("请允许定位权限");
+            }, { enableHighAccuracy: true });
+        }
+    };
+
+    // --- 管理员功能 ---
+    function initiateSign() {
+        if (!navigator.geolocation) return alert('浏览器不支持定位');
+        
+        const btn = document.querySelector('#admin-panel .btn');
+        btn.innerText = "正在获取高精度位置...";
+        btn.disabled = true;
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const lat = position.coords.latitude.toFixed(6);
+                const lng = position.coords.longitude.toFixed(6);
+                
+                // 生成链接 (当前页面URL + 参数)
+                const baseUrl = window.location.href.split('?')[0];
+                const finalLink = `${baseUrl}?mode=sign&lat=${lat}&lng=${lng}`;
+                
+                document.getElementById('share-area').classList.remove('hidden');
+                document.getElementById('share-link').value = finalLink;
+                btn.innerText = "📍 设定成功 (位置已更新)";
+                btn.disabled = false;
+            },
+            (error) => {
+                alert("定位失败：" + error.message);
+                btn.innerText = "📍 重新设定";
+                btn.disabled = false;
+            },
+            { enableHighAccuracy: true, timeout: 5000 }
+        );
+    }
+
+    function copyLink() {
+        const copyText = document.getElementById("share-link");
+        copyText.select();
+        document.execCommand("copy");
+        alert("链接已复制，去发微信群吧！");
+    }
+
+    async function loadData() {
+        const query = new AV.Query('SignRecord');
+        query.descending('createdAt'); // 按时间倒序
+        query.limit(100);
+        
+        try {
+            const results = await query.find();
+            const tbody = document.querySelector('#data-table tbody');
+            tbody.innerHTML = '';
+            
+            results.forEach(record => {
+                const d = record.attributes;
+                const time = record.createdAt.toLocaleTimeString();
+                const row = `<tr>
+                    <td>${d.name}</td>
+                    <td>${d.class}</td>
+                    <td>${d.distance}米</td>
+                    <td>${time}</td>
+                </tr>`;
+                tbody.innerHTML += row;
+            });
+            if(results.length === 0) tbody.innerHTML = '<tr><td colspan="4" style="text-align:center">暂无数据</td></tr>';
+        } catch (error) {
+            alert("读取数据失败，请检查LeanCloud配置");
+            console.error(error);
+        }
+    }
+
+    // --- 学生功能 ---
+    let currentDist = 9999;
+
+    function checkLocation() {
+        const statusEl = document.getElementById('dist-status');
+        const formEl = document.getElementById('sign-form');
+        
+        statusEl.innerText = "正在获取卫星定位...";
+        statusEl.className = "status error";
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                const dist = getDistance(lat, lng, TARGET_LAT, TARGET_LNG);
+                currentDist = dist;
+
+                if (dist <= LIMIT_DIST) {
+                    statusEl.innerText = `✅ 在范围内 (距离 ${dist} 米)`;
+                    statusEl.className = "status success";
+                    formEl.classList.remove('hidden');
+                } else {
+                    statusEl.innerText = `⛔️ 超出范围 (距离 ${dist} 米)\n请移动到老师附近`;
+                    statusEl.className = "status error";
+                    formEl.classList.add('hidden');
+                }
+            },
+            (error) => {
+                statusEl.innerText = "❌ 定位失败，请检查手机GPS和权限";
+            },
+            { enableHighAccuracy: true, timeout: 5000 }
+        );
+    }
+
+    async function submitSign() {
+        const name = document.getElementById('s-name').value.trim();
+        const cls = document.getElementById('s-class').value.trim();
+        const no = document.getElementById('s-no').value.trim();
+
+        if(!name || !cls || !no) return alert("请填写完整信息");
+
+        // 本地缓存
+        localStorage.setItem('user_info', JSON.stringify({name, cls, no}));
+
+        const SignRecord = AV.Object.extend('SignRecord');
+        const record = new SignRecord();
+        
+        record.set('name', name);
+        record.set('class', cls);
+        record.set('studentId', no);
+        record.set('distance', currentDist);
+        record.set('ua', navigator.userAgent); // 简易防作弊：记录设备型号
+
+        document.getElementById('submit-btn').disabled = true;
+        document.getElementById('submit-btn').innerText = "提交中...";
+
+        try {
+            await record.save();
+            document.getElementById('student-panel').classList.add('hidden');
+            document.getElementById('success-panel').classList.remove('hidden');
+        } catch (error) {
+            alert("提交失败：" + error.message);
+            document.getElementById('submit-btn').disabled = false;
+        }
+    }
+</script>
+</body>
+</html>
