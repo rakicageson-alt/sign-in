@@ -3,112 +3,362 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>现场签到</title>
+    <title>班级考勤表</title>
     <!-- 引入 LeanCloud SDK -->
     <script src="//code.bdstatic.com/npm/leancloud-storage@4.12.0/dist/av-min.js"></script>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f5f7fa; margin: 0; padding: 20px; color: #333; }
-        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); max-width: 600px; margin: 0 auto; }
-        h1, h2 { text-align: center; color: #333; margin-top: 0; }
-        .btn { display: block; width: 100%; padding: 12px; background: #07c160; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; margin-top: 15px; }
+        body { font-family: -apple-system, sans-serif; background: #f0f2f5; margin: 0; padding: 15px; color: #333; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        h2, h3 { margin-top: 0; color: #1f2d3d; text-align: center; }
+        
+        /* 按钮样式 */
+        .btn { display: block; width: 100%; padding: 12px; background: #007aff; color: white; border: none; border-radius: 6px; font-size: 16px; margin-top: 10px; cursor: pointer; }
         .btn:disabled { background: #ccc; }
-        .btn-outline { background: white; color: #07c160; border: 1px solid #07c160; }
-        .input-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 16px; }
-        .status { text-align: center; padding: 15px; margin: 15px 0; border-radius: 8px; font-weight: bold; }
-        .success { background: #e6ffed; color: #07c160; }
-        .error { background: #ffe6e6; color: #f56c6c; }
+        .btn-outline { background: white; color: #007aff; border: 1px solid #007aff; }
+        .btn-danger { background: #ff3b30; margin-top: 20px;}
+
+        /* 输入框 */
+        textarea { width: 100%; height: 150px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-family: monospace; }
+        
+        /* 表格样式 (仿Excel) */
+        .table-wrapper { overflow-x: auto; border: 1px solid #ccc; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
+        th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: center; }
+        th { background: #f8f9fa; font-weight: bold; position: sticky; left: 0; z-index: 1;}
+        td:first-child, th:first-child { position: sticky; left: 0; background: #fff; z-index: 2; border-right: 2px solid #ccc;} 
+        th:first-child { background: #f8f9fa; }
+        
+        /* 签到打勾 */
+        .check-mark { color: green; font-weight: bold; font-size: 16px; }
+        
+        /* 学生列表网格 */
+        .student-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-top: 15px; }
+        .student-card { border: 1px solid #eee; padding: 15px; text-align: center; border-radius: 6px; background: #fff; cursor: pointer; transition: all 0.2s; }
+        .student-card.signed { background: #e8ffea; border-color: #28a745; color: #28a745; pointer-events: none; }
+        .student-card:active { background: #f0f0f0; }
+        .s-id { font-size: 12px; color: #999; margin-bottom: 4px; }
+        .s-name { font-weight: bold; font-size: 16px; }
+
         .hidden { display: none; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background: #f2f2f2; }
-        .loading { text-align: center; color: #999; }
-        #debug-info { font-size: 12px; color: #999; text-align: center; margin-top: 20px; }
+        .status { padding: 10px; text-align: center; border-radius: 4px; margin-bottom: 10px; font-size: 14px; }
+        .error { background: #fee; color: #d00; }
+        .success { background: #efe; color: #0a0; }
     </style>
 </head>
 <body>
 
-    <!-- 页面 A: 管理员面板 -->
+    <!-- 管理员面板 -->
     <div id="admin-panel" class="card hidden">
-        <h2>我是管理者</h2>
-        <div style="text-align: center; color: #666; margin-bottom: 20px;">
-            <p>当前定位精度：<span id="admin-acc">...</span> 米</p>
-        </div>
-        <button class="btn" onclick="initiateSign()">📍 设定当前位置为签到点</button>
+        <h2>📋 考勤管理员</h2>
         
-        <div id="share-area" class="hidden" style="margin-top:20px; border-top:1px solid #eee; padding-top:20px;">
-            <p style="text-align: center;">👇 将此链接发到群里 👇</p>
-            <textarea id="share-link" style="width:100%; height:60px; padding:10px; font-size:14px; color:#555;" readonly></textarea>
-            <button class="btn btn-outline" onclick="copyLink()">复制链接</button>
+        <!-- 步骤1: 导入名单 -->
+        <div style="border-bottom: 1px solid #eee; padding-bottom: 20px; margin-bottom: 20px;">
+            <h3>1. 班级名单设置</h3>
+            <p style="font-size:12px; color:#666;">请从Excel复制两列内容（学号 姓名），直接粘贴在下面：</p>
+            <textarea id="roster-input" placeholder="例如：
+25101 张三
+25102 李四"></textarea>
+            <button class="btn btn-outline" onclick="importRoster()">更新班级名单</button>
         </div>
 
-        <div style="margin-top: 30px;">
-            <h3>📊 签到数据汇总</h3>
-            <button class="btn btn-outline" onclick="loadData()">刷新列表</button>
-            <div id="data-table-container" style="overflow-x: auto;">
-                <table id="data-table">
-                    <thead><tr><th>姓名</th><th>班级</th><th>距离误差</th><th>时间</th></tr></thead>
-                    <tbody></tbody>
+        <!-- 步骤2: 发起签到 -->
+        <div>
+            <h3>2. 发起今日签到 (30米)</h3>
+            <div id="gps-status" style="font-size:12px; color:#666; text-align:center; margin-bottom:10px;">定位中...</div>
+            <button class="btn" id="start-btn" onclick="startSign()">📍 设定当前位置并生成链接</button>
+            <div id="share-box" class="hidden" style="margin-top:10px;">
+                <input type="text" id="share-link" style="width:100%; padding:10px;" readonly>
+                <p style="font-size:12px; color:red;">将此链接发到群里</p>
+            </div>
+        </div>
+
+        <!-- 步骤3: 查看报表 -->
+        <div style="margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px;">
+            <h3>3. 考勤汇总表</h3>
+            <button class="btn btn-outline" onclick="loadReport()">刷新报表</button>
+            <div class="table-wrapper" style="margin-top:10px;">
+                <table id="report-table">
+                    <!-- JS动态生成 -->
                 </table>
             </div>
         </div>
     </div>
 
-    <!-- 页面 B: 学生签到面板 -->
+    <!-- 学生签到面板 -->
     <div id="student-panel" class="card hidden">
-        <h1>现场签到</h1>
-        <div class="status error" id="dist-status">正在定位中...</div>
+        <h2>👋 现场签到</h2>
+        <div id="user-status" class="status">正在获取位置...</div>
         
-        <div id="sign-form" class="hidden">
-            <div class="input-group">
-                <label>姓名</label>
-                <input type="text" id="s-name" placeholder="请输入姓名">
+        <div id="roster-list" class="hidden">
+            <p style="text-align:center; color:#666;">请点击你的名字进行签到</p>
+            <div class="student-grid" id="student-grid">
+                <!-- 列表生成区 -->
             </div>
-            <div class="input-group">
-                <label>班级</label>
-                <input type="text" id="s-class" placeholder="请输入班级">
-            </div>
-            <div class="input-group">
-                <label>学号</label>
-                <input type="text" id="s-no" placeholder="请输入学号">
-            </div>
-            <button class="btn" id="submit-btn" onclick="submitSign()">确认签到</button>
         </div>
-        <button class="btn btn-outline" onclick="checkLocation()" style="margin-top:10px;">刷新定位</button>
     </div>
-
-    <!-- 页面 C: 签到成功 -->
-    <div id="success-panel" class="card hidden" style="text-align: center;">
-        <h2 style="color: #07c160;">✅ 签到成功</h2>
-        <p>您的记录已提交</p>
-        <p style="font-size: 12px; color: #999;">请勿重复提交</p>
-    </div>
-
-    <div id="debug-info">V2.0 Pure HTML</div>
 
 <script>
-    // ================= 配置区域 (请修改这里) =================
-    const LEANCLOUD_APP_ID = "0sXEX9TfcX0cmnpC8LW0urn8-gzGzoHsz";      // 替换为 LeanCloud App ID
-    const LEANCLOUD_APP_KEY = "cRbQkmMYvmbq6IZBkCqUi9cU";    // 替换为 LeanCloud App Key
-    const LEANCLOUD_SERVER_URL = "https://0sxex9tf.lc-cn-n1-shared.com"; // 替换为 API 域名
-    // ========================================================
+    // ================= 配置区 =================
+    const LEANCLOUD_APP_ID = "你的AppID";     
+    const LEANCLOUD_APP_KEY = "你的AppKey";   
+    const LEANCLOUD_SERVER_URL = "https://你的域名.leanapp.cn"; 
+    // =========================================
 
-    // 初始化 LeanCloud
-    if(LEANCLOUD_APP_ID !== "你的AppID"){
-        AV.init({ appId: LEANCLOUD_APP_ID, appKey: LEANCLOUD_APP_KEY, serverURL: LEANCLOUD_SERVER_URL });
-    }
+    if(LEANCLOUD_APP_ID === "你的AppID") alert("请先配置代码中的 LeanCloud ID和Key！");
 
-    // 全局变量
+    AV.init({ appId: LEANCLOUD_APP_ID, appKey: LEANCLOUD_APP_KEY, serverURL: LEANCLOUD_SERVER_URL });
+
+    // URL参数处理
     const urlParams = new URLSearchParams(window.location.search);
-    const MODE = urlParams.get('mode'); // 'sign' or null(admin)
+    const MODE = urlParams.get('mode'); 
     const TARGET_LAT = parseFloat(urlParams.get('lat'));
     const TARGET_LNG = parseFloat(urlParams.get('lng'));
-    const LIMIT_DIST = 500; // 限制500米
+    
+    // 限制距离 30米
+    const LIMIT_DIST = 30; 
 
-    // 计算距离公式 (Haversine)
+    // 初始化
+    window.onload = function() {
+        if (MODE === 'sign' && TARGET_LAT && TARGET_LNG) {
+            initStudentPage();
+        } else {
+            initAdminPage();
+        }
+    };
+
+    // ================== 管理员逻辑 ==================
+    function initAdminPage() {
+        document.getElementById('admin-panel').classList.remove('hidden');
+        navigator.geolocation.getCurrentPosition(
+            res => { document.getElementById('gps-status').innerText = `精度: ±${Math.round(res.coords.accuracy)}米`; },
+            err => { document.getElementById('gps-status').innerText = "❌ 请允许定位权限"; }
+        );
+    }
+
+    // 1. 导入名单
+    async function importRoster() {
+        const text = document.getElementById('roster-input').value.trim();
+        if(!text) return alert("内容不能为空");
+        
+        const lines = text.split('\n');
+        const students = [];
+        
+        lines.forEach(line => {
+            // 支持制表符或空格分隔
+            const parts = line.trim().split(/[\t\s]+/);
+            if(parts.length >= 2) {
+                students.push({ sid: parts[0], name: parts[1] });
+            }
+        });
+
+        if(students.length === 0) return alert("格式无法识别，请确保每行是：学号 姓名");
+
+        if(!confirm(`识别到 ${students.length} 人，确定要覆盖旧名单吗？`)) return;
+
+        // 保存到LeanCloud Roster表
+        // 为了简单，我们先清空再添加，或者只存一个大的JSON对象
+        const Roster = AV.Object.extend('ClassRoster');
+        const query = new AV.Query('ClassRoster');
+        try {
+            const old = await query.first();
+            const rosterObj = old || new Roster();
+            rosterObj.set('list', students);
+            await rosterObj.save();
+            alert("✅ 名单已更新！");
+        } catch (e) {
+            alert("保存失败：" + e.message);
+        }
+    }
+
+    // 2. 发起签到
+    function startSign() {
+        if (!navigator.geolocation) return alert('浏览器不支持定位');
+        const btn = document.getElementById('start-btn');
+        btn.disabled = true; btn.innerText = "获取中...";
+
+        navigator.geolocation.getCurrentPosition(pos => {
+            const lat = pos.coords.latitude.toFixed(6);
+            const lng = pos.coords.longitude.toFixed(6);
+            const url = `${window.location.href.split('?')[0]}?mode=sign&lat=${lat}&lng=${lng}`;
+            
+            document.getElementById('share-box').classList.remove('hidden');
+            document.getElementById('share-link').value = url;
+            btn.innerText = "✅ 链接已生成";
+            btn.disabled = false;
+        }, err => {
+            alert("定位失败：" + err.message);
+            btn.disabled = false;
+        }, { enableHighAccuracy: true });
+    }
+
+    // 3. 生成Excel风格报表
+    async function loadReport() {
+        const table = document.getElementById('report-table');
+        table.innerHTML = '<tr><td>加载中...</td></tr>';
+
+        try {
+            // 获取名单
+            const qRoster = new AV.Query('ClassRoster');
+            const rosterData = await qRoster.first();
+            if(!rosterData) return alert("请先导入名单");
+            const students = rosterData.get('list'); // [{sid, name}, ...]
+
+            // 获取所有签到记录
+            const qRecord = new AV.Query('SignInRecord');
+            qRecord.limit(1000); // 假设不超过1000条，多了需分页
+            qRecord.ascending('date'); // 按日期排序
+            const records = await qRecord.find();
+
+            // 整理日期列 (去重)
+            const dates = [...new Set(records.map(r => r.get('date')))];
+            
+            // 构建表头
+            let html = `<thead><tr>
+                <th style="min-width:100px;">学号 | 姓名</th>
+                ${dates.map(d => `<th>${d}</th>`).join('')}
+            </tr></thead><tbody>`;
+
+            // 构建行数据
+            students.forEach(stu => {
+                html += `<tr>`;
+                html += `<td style="font-weight:bold;">${stu.sid} ${stu.name}</td>`;
+                
+                // 遍历该学生每一天的记录
+                dates.forEach(date => {
+                    // 查找该学生在该日期的记录
+                    const hasSigned = records.find(r => 
+                        r.get('date') === date && r.get('sid') === stu.sid
+                    );
+                    html += `<td>${hasSigned ? '<span class="check-mark">✔</span>' : ''}</td>`;
+                });
+                html += `</tr>`;
+            });
+            html += `</tbody>`;
+            table.innerHTML = html;
+
+        } catch (e) {
+            alert("加载报表失败：" + e.message);
+        }
+    }
+
+    // ================== 学生逻辑 ==================
+    async function initStudentPage() {
+        document.getElementById('student-panel').classList.remove('hidden');
+        const statusEl = document.getElementById('user-status');
+
+        // 1. 检查今日设备锁 (LocalStorage)
+        const todayStr = new Date().toLocaleDateString();
+        const lastSignDate = localStorage.getItem('last_sign_date');
+        
+        if (lastSignDate === todayStr) {
+            statusEl.className = "status success";
+            statusEl.innerText = "✅ 您今日已签到，请勿重复操作";
+            // 这里我们依然加载列表，但让其不可点，或者直接不加载
+            // 为了展示效果，我们继续执行，但在点击时拦截
+        }
+
+        // 2. 校验距离
+        navigator.geolocation.getCurrentPosition(async pos => {
+            const dist = getDistance(pos.coords.latitude, pos.coords.longitude, TARGET_LAT, TARGET_LNG);
+            
+            if (dist > LIMIT_DIST) {
+                statusEl.className = "status error";
+                statusEl.innerText = `⛔ 超出范围 (距离${dist}米)\n请在教室${LIMIT_DIST}米范围内打开`;
+                return; 
+            }
+
+            statusEl.className = "status success";
+            statusEl.innerText = `📍 位置符合 (误差${dist}米)`;
+            
+            // 3. 加载名单
+            await renderStudentList(todayStr);
+
+        }, err => {
+            statusEl.className = "status error";
+            statusEl.innerText = "❌ 无法定位，请开启手机定位权限";
+        }, { enableHighAccuracy: true });
+    }
+
+    async function renderStudentList(todayStr) {
+        const grid = document.getElementById('student-grid');
+        document.getElementById('roster-list').classList.remove('hidden');
+        grid.innerHTML = "加载名单中...";
+
+        try {
+            // 获取名单
+            const qRoster = new AV.Query('ClassRoster');
+            const rosterData = await qRoster.first();
+            if(!rosterData) { grid.innerHTML = "管理员暂未配置名单"; return; }
+            const students = rosterData.get('list');
+
+            // 获取今日已签到记录 (避免多人点同一个)
+            const qToday = new AV.Query('SignInRecord');
+            qToday.equalTo('date', todayStr);
+            const todayRecords = await qToday.find();
+            const signedSids = todayRecords.map(r => r.get('sid'));
+
+            grid.innerHTML = "";
+            
+            students.forEach(stu => {
+                const isSigned = signedSids.includes(stu.sid);
+                const div = document.createElement('div');
+                div.className = `student-card ${isSigned ? 'signed' : ''}`;
+                div.innerHTML = `<div class="s-id">${stu.sid}</div><div class="s-name">${stu.name}</div>${isSigned ? '<div>已签</div>' : ''}`;
+                
+                if (!isSigned) {
+                    div.onclick = () => doSign(stu.sid, stu.name, todayStr, div);
+                }
+                grid.appendChild(div);
+            });
+
+        } catch (e) {
+            grid.innerHTML = "加载失败";
+        }
+    }
+
+    async function doSign(sid, name, dateStr, divEl) {
+        // 二次检查设备锁
+        if (localStorage.getItem('last_sign_date') === dateStr) {
+            alert("⚠️ 本手机今日已签到过，无法替他人签到！");
+            return;
+        }
+
+        if(!confirm(`确认是【${name}】本人吗？\n签到后本手机今日将无法再签到。`)) return;
+
+        // 提交数据
+        const Record = AV.Object.extend('SignInRecord');
+        const r = new Record();
+        r.set('sid', sid);
+        r.set('name', name);
+        r.set('date', dateStr);
+        // r.set('ua', navigator.userAgent); // 可选：记录设备特征
+
+        try {
+            divEl.style.background = "#eee";
+            divEl.innerText = "提交中...";
+            
+            await r.save();
+            
+            // 写入设备锁
+            localStorage.setItem('last_sign_date', dateStr);
+            
+            // UI反馈
+            divEl.className = "student-card signed";
+            divEl.innerHTML = `<div class="s-id">${sid}</div><div class="s-name">${name}</div><div>✔ 成功</div>`;
+            divEl.onclick = null;
+            
+            alert("✅ 签到成功！");
+            document.getElementById('user-status').innerText = "✅ 您今日已完成签到";
+
+        } catch (e) {
+            alert("签到失败：" + e.message);
+            divEl.innerText = name; // 恢复
+        }
+    }
+
+    // 距离计算算法
     function getDistance(lat1, lng1, lat2, lng2) {
-        const R = 6378137; // 地球半径
+        const R = 6378137;
         const dLat = (lat2 - lat1) * Math.PI / 180;
         const dLng = (lng2 - lng1) * Math.PI / 180;
         const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
@@ -116,167 +366,6 @@
                   Math.sin(dLng/2) * Math.sin(dLng/2);
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         return Math.round(R * c);
-    }
-
-    // 主逻辑入口
-    window.onload = function() {
-        if (!LEANCLOUD_APP_ID || LEANCLOUD_APP_ID === "你的AppID") {
-            alert("⚠️ 请先在代码中配置 LeanCloud AppID！");
-            return;
-        }
-
-        if (MODE === 'sign' && TARGET_LAT && TARGET_LNG) {
-            // 进入学生签到模式
-            document.getElementById('student-panel').classList.remove('hidden');
-            // 自动回填
-            const cached = JSON.parse(localStorage.getItem('user_info') || '{}');
-            if(cached.name) document.getElementById('s-name').value = cached.name;
-            if(cached.cls) document.getElementById('s-class').value = cached.cls;
-            if(cached.no) document.getElementById('s-no').value = cached.no;
-            checkLocation();
-        } else {
-            // 进入管理员模式
-            document.getElementById('admin-panel').classList.remove('hidden');
-            // 获取管理员当前位置精度
-            navigator.geolocation.getCurrentPosition(res => {
-                document.getElementById('admin-acc').innerText = Math.round(res.coords.accuracy);
-            }, err => {
-                document.getElementById('admin-acc').innerText = "获取失败";
-                alert("请允许定位权限");
-            }, { enableHighAccuracy: true });
-        }
-    };
-
-    // --- 管理员功能 ---
-    function initiateSign() {
-        if (!navigator.geolocation) return alert('浏览器不支持定位');
-        
-        const btn = document.querySelector('#admin-panel .btn');
-        btn.innerText = "正在获取高精度位置...";
-        btn.disabled = true;
-
-        navigator.geolocation.getCurrentPosition(
-            (position) => {
-                const lat = position.coords.latitude.toFixed(6);
-                const lng = position.coords.longitude.toFixed(6);
-                
-                // 生成链接 (当前页面URL + 参数)
-                const baseUrl = window.location.href.split('?')[0];
-                const finalLink = `${baseUrl}?mode=sign&lat=${lat}&lng=${lng}`;
-                
-                document.getElementById('share-area').classList.remove('hidden');
-                document.getElementById('share-link').value = finalLink;
-                btn.innerText = "📍 设定成功 (位置已更新)";
-                btn.disabled = false;
-            },
-            (error) => {
-                alert("定位失败：" + error.message);
-                btn.innerText = "📍 重新设定";
-                btn.disabled = false;
-            },
-            { enableHighAccuracy: true, timeout: 5000 }
-        );
-    }
-
-    function copyLink() {
-        const copyText = document.getElementById("share-link");
-        copyText.select();
-        document.execCommand("copy");
-        alert("链接已复制，去发微信群吧！");
-    }
-
-    async function loadData() {
-        const query = new AV.Query('SignRecord');
-        query.descending('createdAt'); // 按时间倒序
-        query.limit(100);
-        
-        try {
-            const results = await query.find();
-            const tbody = document.querySelector('#data-table tbody');
-            tbody.innerHTML = '';
-            
-            results.forEach(record => {
-                const d = record.attributes;
-                const time = record.createdAt.toLocaleTimeString();
-                const row = `<tr>
-                    <td>${d.name}</td>
-                    <td>${d.class}</td>
-                    <td>${d.distance}米</td>
-                    <td>${time}</td>
-                </tr>`;
-                tbody.innerHTML += row;
-            });
-            if(results.length === 0) tbody.innerHTML = '<tr><td colspan="4" style="text-align:center">暂无数据</td></tr>';
-        } catch (error) {
-            alert("读取数据失败，请检查LeanCloud配置");
-            console.error(error);
-        }
-    }
-
-    // --- 学生功能 ---
-    let currentDist = 9999;
-
-    function checkLocation() {
-        const statusEl = document.getElementById('dist-status');
-        const formEl = document.getElementById('sign-form');
-        
-        statusEl.innerText = "正在获取卫星定位...";
-        statusEl.className = "status error";
-
-        navigator.geolocation.getCurrentPosition(
-            (position) => {
-                const lat = position.coords.latitude;
-                const lng = position.coords.longitude;
-                const dist = getDistance(lat, lng, TARGET_LAT, TARGET_LNG);
-                currentDist = dist;
-
-                if (dist <= LIMIT_DIST) {
-                    statusEl.innerText = `✅ 在范围内 (距离 ${dist} 米)`;
-                    statusEl.className = "status success";
-                    formEl.classList.remove('hidden');
-                } else {
-                    statusEl.innerText = `⛔️ 超出范围 (距离 ${dist} 米)\n请移动到老师附近`;
-                    statusEl.className = "status error";
-                    formEl.classList.add('hidden');
-                }
-            },
-            (error) => {
-                statusEl.innerText = "❌ 定位失败，请检查手机GPS和权限";
-            },
-            { enableHighAccuracy: true, timeout: 5000 }
-        );
-    }
-
-    async function submitSign() {
-        const name = document.getElementById('s-name').value.trim();
-        const cls = document.getElementById('s-class').value.trim();
-        const no = document.getElementById('s-no').value.trim();
-
-        if(!name || !cls || !no) return alert("请填写完整信息");
-
-        // 本地缓存
-        localStorage.setItem('user_info', JSON.stringify({name, cls, no}));
-
-        const SignRecord = AV.Object.extend('SignRecord');
-        const record = new SignRecord();
-        
-        record.set('name', name);
-        record.set('class', cls);
-        record.set('studentId', no);
-        record.set('distance', currentDist);
-        record.set('ua', navigator.userAgent); // 简易防作弊：记录设备型号
-
-        document.getElementById('submit-btn').disabled = true;
-        document.getElementById('submit-btn').innerText = "提交中...";
-
-        try {
-            await record.save();
-            document.getElementById('student-panel').classList.add('hidden');
-            document.getElementById('success-panel').classList.remove('hidden');
-        } catch (error) {
-            alert("提交失败：" + error.message);
-            document.getElementById('submit-btn').disabled = false;
-        }
     }
 </script>
 </body>
